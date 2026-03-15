@@ -1,8 +1,16 @@
-# easyploy CI/CD
+# easyploy-n8da-ci
 
-**Automatisierte Qualitätsprüfung für easyploy**
+**CI workflow for easyploy using n8n dev actions**
 
 Dieses Repository enthält die CI/CD Konfiguration für [easyploy](https://github.com/iamthamanic/easyploy) - erstellt mit dem [n8n-dev-actions-template](https://github.com/iamthamanic/n8n-dev-actions-template).
+
+## Naming Convention
+
+`{repo-name}-n8da-{action-name}`
+
+- **easyploy**: Das Ziel-Repository
+- **n8da**: n8n dev actions (dieses Template-System)
+- **ci**: Die spezifische Action (continuous integration)
 
 ## Status
 
