@@ -1,0 +1,105 @@
+{
+  "_comment": "CI/CD Konfiguration für easyploy - Automatisch generiert aus Template",
+  "project": {
+    "name": "easyploy",
+    "type": "node",
+    "repository": "iamthamanic/easyploy",
+    "description": "Declarative deployment engine for self-hosted infrastructure"
+  },
+  "workflow": {
+    "template": "02-node-template.json",
+    "version": "1.0.0",
+    "stages": [
+      "install",
+      "lint",
+      "test",
+      "build",
+      "quality-gate"
+    ],
+    "webhook": {
+      "url": "https://n8n-xpip.srv1492167.hstgr.cloud/webhook/ci-easyploy",
+      "method": "POST",
+      "path": "ci-easyploy"
+    },
+    "triggers": {
+      "push": true,
+      "pull_request": true,
+      "branches": ["main", "develop"]
+    }
+  },
+  "runner": {
+    "host": "srv1492167.hstgr.cloud",
+    "user": "root",
+    "ssh_key": "~/.ssh/id_ed25519",
+    "working_dir": "/tmp/ci/easyploy"
+  },
+  "build": {
+    "commands": {
+      "install": "pnpm install",
+      "lint": "pnpm run lint",
+      "test": "pnpm run test",
+      "build": "pnpm run build"
+    },
+    "artifacts": [
+      "dist/",
+      "coverage/"
+    ],
+    "env": {
+      "NODE_ENV": "production",
+      "CI": "true",
+      "TURBO_TELEMETRY_DISABLED": "1"
+    }
+  },
+  "quality_gate": {
+    "enabled": true,
+    "tool": "shimwrappercheck",
+    "model": "kimi-k2.5",
+    "ollama_host": "http://localhost:11434",
+    "checks": ["security", "quality", "tests"],
+    "fail_on_error": true
+  },
+  "notifications": {
+    "telegram": {
+      "enabled": true,
+      "chat_id": "5220247822",
+      "on_success": false,
+      "on_failure": true
+    },
+    "github_status": {
+      "enabled": true,
+      "context": "n8n-ci/easyploy"
+    }
+  },
+  "secrets": {
+    "github_token": {
+      "source": "env",
+      "key": "GITHUB_TOKEN"
+    },
+    "telegram_token": {
+      "source": "env",
+      "key": "TELEGRAM_BOT_TOKEN"
+    },
+    "ssh_private_key": {
+      "source": "file",
+      "path": "~/.ssh/id_ed25519"
+    }
+  },
+  "deployment": {
+    "enabled": false,
+    "note": "Easyploy ist ein CLI-Tool, kein Deployment nötig"
+  },
+  "custom_stages": [
+    {
+      "name": "monorepo-check",
+      "command": "pnpm turbo run build --filter=...[HEAD^1]",
+      "fail_on_error": true,
+      "description": "Baut nur geänderte Packages im Monorepo"
+    }
+  ],
+  "_template_info": {
+    "template_repo": "iamthamanic/n8n-dev-actions-template",
+    "version": "1.0.0",
+    "created": "2026-03-15",
+    "setup_by": "Raccoovaclaw"
+  }
+}
