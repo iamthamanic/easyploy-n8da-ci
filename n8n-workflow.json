@@ -1,0 +1,289 @@
+{
+  "name": "easyploy-n8da-ci",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ci-easyploy",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-receive",
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "ci-easyploy"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse GitHub Event\nconst body = $input.first().json.body;\nconst headers = $input.first().json.headers;\n\nconst eventType = headers['x-github-event'];\nconst deliveryId = headers['x-github-delivery'];\n\nlet stage = 'unknown';\nlet branch = '';\nlet prTarget = '';\nlet commitSha = '';\n\nif (eventType === 'push') {\n  branch = body.ref.replace('refs/heads/', '');\n  commitSha = body.after;\n  stage = 'stage_1_push';\n} else if (eventType === 'pull_request') {\n  branch = body.pull_request.head.ref;\n  prTarget = body.pull_request.base.ref;\n  commitSha = body.pull_request.head.sha;\n  if (prTarget === 'main') {\n    stage = 'stage_2_pr';\n  }\n} else if (eventType === 'release') {\n  branch = 'main';\n  commitSha = body.release.tag_name;\n  stage = 'stage_3_release';\n}\n\nreturn [{\n  json: {\n    eventType,\n    deliveryId,\n    stage,\n    branch,\n    prTarget,\n    commitSha,\n    repository: body.repository?.full_name || 'iamthamanic/easyploy',\n    sender: body.sender?.login || 'unknown'\n  }\n}];"
+      },
+      "id": "parse-event",
+      "name": "Parse Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "rules": [
+            {
+              "value": "stage_1_push",
+              "output": 0
+            },
+            {
+              "value": "stage_2_pr",
+              "output": 1
+            },
+            {
+              "value": "stage_3_release",
+              "output": 2
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "route-stage",
+      "name": "Route by Stage",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Stage 1: Push Checks (2-3 Min)\nconst checks = [\n  { name: 'install', command: 'pnpm install', weight: 10 },\n  { name: 'typescript', command: 'pnpm run lint', weight: 20 },\n  { name: 'eslint', command: 'pnpm eslint . --ext .ts,.tsx', weight: 20 },\n  { name: 'prettier', command: 'pnpm prettier --check \"**/*.{ts,tsx,json,md}\"', weight: 15 },\n  { name: 'npm-audit', command: 'npm audit --audit-level=moderate', weight: 15 },\n  { name: 'complexity', command: 'npx complexity-report src/ || true', weight: 10 },\n  { name: 'ai-review-quick', command: 'ai-review --stage=quick', weight: 10 }\n];\n\nreturn [{\n  json: {\n    stage: 'stage_1_push',\n    checks,\n    timeout: '5m',\n    minScore: 85\n  }\n}];"
+      },
+      "id": "stage-1-config",
+      "name": "Stage 1 Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Stage 2: PR Checks (5-8 Min)\nconst checks = [\n  { name: 'install', command: 'pnpm install', weight: 5 },\n  { name: 'typescript', command: 'pnpm run lint', weight: 15 },\n  { name: 'eslint', command: 'pnpm eslint . --ext .ts,.tsx', weight: 15 },\n  { name: 'prettier', command: 'pnpm prettier --check \"**/*.{ts,tsx,json,md}\"', weight: 10 },\n  { name: 'npm-audit', command: 'npm audit --audit-level=moderate', weight: 10 },\n  { name: 'complexity', command: 'npx complexity-report src/ || true', weight: 5 },\n  { name: 'sast', command: 'semgrep --config=p/typescript --error', weight: 15 },\n  { name: 'architecture', command: 'shimwrappercheck --checks=solid,kiss,dry', weight: 15 },\n  { name: 'update-readme', command: 'check-readme-version-sync', weight: 5 },\n  { name: 'ai-review-full', command: 'ai-review --stage=full', weight: 5 }\n];\n\nreturn [{\n  json: {\n    stage: 'stage_2_pr',\n    checks,\n    timeout: '10m',\n    minScore: 90\n  }\n}];"
+      },
+      "id": "stage-2-config",
+      "name": "Stage 2 Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Stage 3: Release Checks (15-30 Min)\nconst checks = [\n  { name: 'install', command: 'pnpm install', weight: 3 },\n  { name: 'typescript', command: 'pnpm run lint', weight: 10 },\n  { name: 'eslint', command: 'pnpm eslint . --ext .ts,.tsx', weight: 10 },\n  { name: 'prettier', command: 'pnpm prettier --check \"**/*.{ts,tsx,json,md}\"', weight: 5 },\n  { name: 'npm-audit', command: 'npm audit --audit-level=moderate', weight: 10 },\n  { name: 'complexity', command: 'npx complexity-report src/ || true', weight: 3 },\n  { name: 'sast', command: 'semgrep --config=p/typescript --error', weight: 10 },\n  { name: 'architecture', command: 'shimwrappercheck --checks=solid,kiss,dry', weight: 10 },\n  { name: 'update-readme', command: 'check-readme-version-sync', weight: 3 },\n  { name: 'unit-tests', command: 'pnpm test', weight: 15 },\n  { name: 'e2e-tests', command: 'pnpm test:e2e', weight: 15 },\n  { name: 'mutation-tests', command: 'stryker run', weight: 10 },\n  { name: 'ai-review-full', command: 'ai-review --stage=full', weight: 6 }\n];\n\nreturn [{\n  json: {\n    stage: 'stage_3_release',\n    checks,\n    timeout: '45m',\n    minScore: 95\n  }\n}];"
+      },
+      "id": "stage-3-config",
+      "name": "Stage 3 Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 500]
+    },
+    {
+      "parameters": {
+        "operation": "executeCommand",
+        "command": "={{ $json.checks.map(c => c.command).join(' && ') }}",
+        "cwd": "/tmp/ci/easyploy",
+        "timeout": "={{ $json.timeout }}"
+      },
+      "id": "execute-checks",
+      "name": "Execute Checks",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1050, 300],
+      "credentials": {
+        "sshPassword": {
+          "id": "ssh-easyploy-runner",
+          "name": "SSH Easyploy Runner"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate Score\nconst results = $input.all()[0].json;\nconst config = $input.all()[1].json;\n\nlet totalScore = 100;\nconst deductions = [];\n\n// Parse check results\nfor (const check of config.checks) {\n  const result = results[check.name];\n  if (!result || result.status === 'failed') {\n    totalScore -= check.weight;\n    deductions.push({\n      check: check.name,\n      points: check.weight,\n      reason: result?.error || 'Check failed'\n    });\n}\n\nconst passed = totalScore >= config.minScore;\n\nreturn [{\n  json: {\n    score: totalScore,\n    minScore: config.minScore,\n    passed,\n    deductions,\n    verdict: passed ? 'ACCEPT' : 'REJECT'\n  }\n}];"
+      },
+      "id": "calculate-score",
+      "name": "Calculate Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "repository",
+        "operation": "createCheck",
+        "owner": "={{ $json.repository.split('/')[0] }}",
+        "repository": "={{ $json.repository.split('/')[1] }}",
+        "name": "n8n-ci/easyploy",
+        "headSha": "={{ $json.commitSha }}",
+        "status": "completed",
+        "conclusion": "={{ $json.passed ? 'success' : 'failure' }}",
+        "output": {
+          "title": "CI Results - Score: {{ $json.score }}/100",\n          "summary": "{{ $json.passed ? '✅ All checks passed' : '❌ Some checks failed' }}",\n          "text": "Score: {{ $json.score }}% (min: {{ $json.minScore }}%)\\n\\nDeductions:\\n{{ $json.deductions.map(d => `- ${d.check}: -${d.points} (${d.reason})`).join('\\n') }}"
+        }
+      },
+      "id": "github-status",
+      "name": "GitHub Status",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [1450, 200],
+      "credentials": {
+        "githubApi": {
+          "id": "github-api",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "5220247822",
+        "text": "={{ $json.passed ? '✅' : '❌' }} easyploy CI\\n\\nStage: {{ $json.stage }}\\nScore: {{ $json.score }}/100 (min: {{ $json.minScore }})\\nVerdict: {{ $json.verdict }}\\n\\n{{ $json.deductions.length > 0 ? 'Deductions:\\n' + $json.deductions.map(d => `- ${d.check}: -${d.points}`).join('\\n') : 'All checks passed!' }}",
+        "options": {}
+      },
+      "id": "telegram-notify",
+      "name": "Telegram Notify",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1450, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: $json.passed, score: $json.score, verdict: $json.verdict }) }}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1650, 300]
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Event": {
+      "main": [
+        [
+          {
+            "node": "Route by Stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Stage": {
+      "main": [
+        [
+          {
+            "node": "Stage 1 Config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stage 2 Config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stage 3 Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 1 Config": {
+      "main": [
+        [
+          {
+            "node": "Execute Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 2 Config": {
+      "main": [
+        [
+          {
+            "node": "Execute Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 3 Config": {
+      "main": [
+        [
+          {
+            "node": "Execute Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Checks": {
+      "main": [
+        [
+          {
+            "node": "Calculate Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Score": {
+      "main": [
+        [
+          {
+            "node": "GitHub Status",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram Notify",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["ci-cd", "easyploy", "quality-checks"]
+}
