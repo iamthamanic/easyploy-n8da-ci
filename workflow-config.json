@@ -1,5 +1,5 @@
 {
-  "_comment": "CI/CD Konfiguration für easyploy - Automatisch generiert aus Template",
+  "_comment": "CI/CD Konfiguration für easyploy - Stufenweise Qualitäts-Checks",
   "project": {
     "name": "easyploy",
     "type": "node",
@@ -8,23 +8,70 @@
   },
   "workflow": {
     "template": "02-node-template.json",
-    "version": "1.0.0",
-    "stages": [
-      "install",
-      "lint",
-      "test",
-      "build",
-      "quality-gate"
-    ],
+    "version": "2.0.0",
+    "stages": {
+      "stage_1_push": {
+        "description": "Schnelle Checks bei jedem Push (2-3 Min)",
+        "triggers": ["push"],
+        "branches": ["*"],
+        "steps": [
+          "install",
+          "typescript-check",
+          "eslint",
+          "prettier-check",
+          "npm-audit",
+          "complexity-check",
+          "ai-review-quick"
+        ],
+        "timeout": "5m",
+        "fail_fast": true
+      },
+      "stage_2_pr": {
+        "description": "Gründliche Checks bei PR zu main (5-8 Min)",
+        "triggers": ["pull_request"],
+        "branches": ["main"],
+        "steps": [
+          "install",
+          "typescript-check",
+          "eslint",
+          "prettier-check",
+          "npm-audit",
+          "complexity-check",
+          "sast",
+          "architecture-review",
+          "update-readme-check",
+          "ai-review-full"
+        ],
+        "timeout": "10m",
+        "fail_fast": true
+      },
+      "stage_3_release": {
+        "description": "Vollständige Checks vor Release (15-30 Min)",
+        "triggers": ["release", "tag"],
+        "branches": ["main"],
+        "steps": [
+          "install",
+          "typescript-check",
+          "eslint",
+          "prettier-check",
+          "npm-audit",
+          "complexity-check",
+          "sast",
+          "architecture-review",
+          "update-readme-check",
+          "unit-tests",
+          "e2e-tests",
+          "mutation-tests",
+          "ai-review-full"
+        ],
+        "timeout": "45m",
+        "fail_fast": false
+      }
+    },
     "webhook": {
       "url": "https://n8n-xpip.srv1492167.hstgr.cloud/webhook/ci-easyploy",
       "method": "POST",
       "path": "ci-easyploy"
-    },
-    "triggers": {
-      "push": true,
-      "pull_request": true,
-      "branches": ["main", "develop"]
     }
   },
   "runner": {
@@ -36,8 +83,12 @@
   "build": {
     "commands": {
       "install": "pnpm install",
-      "lint": "pnpm run lint",
-      "test": "pnpm run test",
+      "typescript-check": "pnpm run lint",
+      "eslint": "pnpm eslint . --ext .ts,.tsx",
+      "prettier-check": "pnpm prettier --check \"**/*.{ts,tsx,json,md}\"",
+      "npm-audit": "npm audit --audit-level=moderate",
+      "complexity-check": "npx complexity-report src/ || true",
+      "unit-tests": "pnpm test",
       "build": "pnpm run build"
     },
     "artifacts": [
@@ -55,19 +106,85 @@
     "tool": "shimwrappercheck",
     "model": "kimi-k2.5",
     "ollama_host": "http://localhost:11434",
-    "checks": ["security", "quality", "tests"],
-    "fail_on_error": true
+    "stages": {
+      "stage_1": {
+        "checks": ["quality", "security-quick"],
+        "min_score": 85,
+        "fail_on_error": true
+      },
+      "stage_2": {
+        "checks": ["quality", "security", "architecture", "maintainability"],
+        "min_score": 90,
+        "fail_on_error": true
+      },
+      "stage_3": {
+        "checks": ["quality", "security", "architecture", "maintainability", "performance"],
+        "min_score": 95,
+        "fail_on_error": true
+      }
+    }
+  },
+  "checks": {
+    "sast": {
+      "enabled": true,
+      "tool": "semgrep",
+      "config": "p/typescript",
+      "severity": "ERROR"
+    },
+    "architecture": {
+      "enabled": true,
+      "tool": "shimwrappercheck",
+      "checks": ["solid", "kiss", "dry", "modularity"]
+    },
+    "update_readme": {
+      "enabled": true,
+      "check_version_sync": true,
+      "auto_fix": false
+    },
+    "e2e": {
+      "enabled": true,
+      "command": "pnpm test:e2e",
+      "needs_services": ["postgres", "redis", "minio"]
+    },
+    "mutation": {
+      "enabled": true,
+      "tool": "stryker",
+      "threshold": 70
+    }
+  },
+  "ai_review": {
+    "enabled": true,
+    "provider": "ollama",
+    "model": "kimi-k2.5",
+    "stages": {
+      "quick": {
+        "focus": ["syntax", "basic-solid", "obvious-bugs"],
+        "max_tokens": 2000,
+        "timeout": "60s"
+      },
+      "full": {
+        "focus": ["solid", "architecture", "security", "performance", "maintainability"],
+        "max_tokens": 8000,
+        "timeout": "180s"
+      }
+    }
   },
   "notifications": {
     "telegram": {
       "enabled": true,
       "chat_id": "5220247822",
       "on_success": false,
-      "on_failure": true
+      "on_failure": true,
+      "include_details": true
     },
     "github_status": {
       "enabled": true,
       "context": "n8n-ci/easyploy"
+    },
+    "github_comment": {
+      "enabled": true,
+      "on_pr": true,
+      "include_report": true
     }
   },
   "secrets": {
@@ -93,13 +210,15 @@
       "name": "monorepo-check",
       "command": "pnpm turbo run build --filter=...[HEAD^1]",
       "fail_on_error": true,
-      "description": "Baut nur geänderte Packages im Monorepo"
+      "description": "Baut nur geänderte Packages im Monorepo",
+      "run_on": ["stage_2_pr", "stage_3_release"]
     }
   ],
   "_template_info": {
     "template_repo": "iamthamanic/n8n-dev-actions-template",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "created": "2026-03-15",
+    "updated": "2026-03-16",
     "setup_by": "Raccoovaclaw"
   }
 }
